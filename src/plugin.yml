@@ -1,0 +1,8 @@
+name: SCPvP
+version: 1.0
+depends: [SCLogin]
+main: com.github.DarkSeraphim.SCPvP.SCPvP
+
+commands:
+  rank:
+    default: op
