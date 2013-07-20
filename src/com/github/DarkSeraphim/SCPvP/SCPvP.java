@@ -14,9 +14,13 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
+import org.bukkit.event.player.PlayerPickupItemEvent;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.sensationcraft.login.event.SCLoginRegisterEvent;
+
+import com.massivecraft.factions.Board;
+import com.massivecraft.factions.FLocation;
 
 /**
  *
@@ -137,6 +141,13 @@ public class SCPvP extends JavaPlugin implements Listener
         {
             removeProtection(attacker);
         }
+    }
+    
+    @EventHandler
+    public void onPick(PlayerPickupItemEvent e){
+    	if(isProtected(e.getPlayer()) && Board.getFactionAt(new FLocation(e.getPlayer().getLocation())).isWarZone()){
+    		e.setCancelled(true);
+    	}
     }
     
     @EventHandler
