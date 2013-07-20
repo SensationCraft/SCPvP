@@ -9,6 +9,7 @@ import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -61,6 +62,7 @@ public class SCPvP extends JavaPlugin implements Listener
     @Override
     public void onDisable()
     {
+        Titles.getInstance().disable();
         YamlConfiguration yc = new YamlConfiguration();
         synchronized(this.lock)
         {
@@ -104,22 +106,36 @@ public class SCPvP extends JavaPlugin implements Listener
     @EventHandler (priority = EventPriority.LOWEST, ignoreCancelled = true)
     public void onDamage(EntityDamageByEntityEvent event)
     {
-        if(event.getEntity() instanceof Player && event.getDamager() instanceof Player)
+        if(event.getEntity() instanceof Player == false) return;
+        Player attacked = (Player) event.getEntity();
+        Player attacker = null;
+        boolean isPvP = event.getDamager() instanceof Player;
+        if(isPvP)
         {
-            Player attacker = (Player) event.getDamager();
-            Player attacked = (Player) event.getEntity();
-            if(isProtected(attacked))
-            {
-                event.setDamage(0);
-                event.setCancelled(true);
-                attacker.sendMessage(PROTECTED);
-                return;
-            }
-            
-            if(isProtected(attacker))
-            {
-                removeProtection(attacker);
-            }
+            attacker = (Player) event.getDamager();
+        }
+        if(event.getDamager() instanceof Projectile)
+        {
+            isPvP = ((Projectile)event.getDamager()).getShooter() instanceof Player;
+        }
+        if(!isPvP) return;
+        
+        if(attacker == null)
+        {
+            attacker = (Player) ((Projectile)event.getDamager()).getShooter();
+        }
+        
+        if(isProtected(attacked))
+        {
+            event.setDamage(0);
+            event.setCancelled(true);
+            attacker.sendMessage(PROTECTED);
+            return;
+        }
+        
+        if(isProtected(attacker))
+        {
+            removeProtection(attacker);
         }
     }
     
@@ -129,6 +145,7 @@ public class SCPvP extends JavaPlugin implements Listener
         final String name = event.getName();
         synchronized(this.lock)
         {
+            if(this.protection.containsKey(name.toLowerCase())) return;
             this.protection.put(name.toLowerCase(), System.currentTimeMillis() + PROTECTION_TIME);
         }
         final Player player = Bukkit.getPlayerExact(name);

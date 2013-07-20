@@ -3,12 +3,18 @@ package com.github.DarkSeraphim.SCPvP;
 import com.google.common.base.Joiner;
 import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.logging.Level;
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.Sound;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -16,6 +22,7 @@ import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Entity;
 import org.bukkit.entity.Player;
+import org.bukkit.entity.Projectile;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.entity.EntityDamageByEntityEvent;
@@ -29,7 +36,7 @@ import org.bukkit.plugin.java.JavaPlugin;
 public class Titles implements Listener, CommandExecutor
 {
     
-    private final static Titles instance = new Titles();
+    private static Titles instance = new Titles();
         
     private JavaPlugin plugin;
     
@@ -37,13 +44,34 @@ public class Titles implements Listener, CommandExecutor
     
     YamlConfiguration yc;
     
+    List<String> rankKeys;
+    
     private final Map<String, String> lastKill = new HashMap<String, String>();
+    
+    Comparator<String> comparator = new Comparator<String>()
+    {
+
+        @Override
+        public int compare(String o1, String o2)
+        {
+            int i1 = Titles.strToInt(o1);
+            int i2 = Titles.strToInt(o2);
+            return i1 - i2;
+        }
+        
+    };
     
     private final String HELP = ChatColor.DARK_BLUE+"-- "+ChatColor.YELLOW+"SCPvPTitle"+ChatColor.DARK_BLUE+" --\n"+ChatColor.WHITE
                               + "/rank reset <playername>  - resets ones title\n"
                               + "/rank set <rank> <title>  - sets the title for that level\n"
                               + "/rank rem <rank>          - removes the rank for that level\n"
                               + "/rank list                - lists the ranks";
+    
+    private final String RANKING = "\n"
+                                  +ChatColor.YELLOW+""+ChatColor.BOLD+"You have "+ChatColor.RED+""+ChatColor.BOLD+""+ChatColor.UNDERLINE+"%d kills\n"
+                                  +ChatColor.YELLOW+""+ChatColor.BOLD+"Next rank title: "+ChatColor.RED+""+ChatColor.BOLD+""+ChatColor.UNDERLINE+"%s\n"
+                                  +"\n";
+    private final String RANKUP = ChatColor.translateAlternateColorCodes('&', "\n&a&lYou have recieved a new title: %s\n");
     
     private Titles()
     {
@@ -60,13 +88,15 @@ public class Titles implements Listener, CommandExecutor
         {
             try
             {
-                if(!this.saveFile.getParentFile().mkdirs() || !this.saveFile.createNewFile())
+                if(!this.saveFile.getParentFile().exists() && !this.saveFile.getParentFile().mkdirs())
                 {
-                    throw new IOException("Failed to create savefile");
+                    throw new IOException("Failed to create savefile @ "+this.saveFile.getAbsolutePath());
                 }
+                this.saveFile.createNewFile();
             }
             catch(IOException ex)
             {
+                ex.printStackTrace();
                 this.saveFile = null;
             }
         }
@@ -76,7 +106,16 @@ public class Titles implements Listener, CommandExecutor
         else
             this.yc = new YamlConfiguration();
         
+        refreshRankList();
+        
         Bukkit.getPluginCommand("rank").setExecutor(this);
+        Bukkit.getPluginCommand("ranking").setExecutor(this);
+        Bukkit.getPluginManager().registerEvents(this, plugin);
+    }
+    
+    protected void disable()
+    {
+        Titles.instance = null;
     }
     
     private boolean canSave()
@@ -84,7 +123,7 @@ public class Titles implements Listener, CommandExecutor
         return this.saveFile != null && this.saveFile.exists();
     }
     
-    private int strToInt(String s)
+    private static int strToInt(String s)
     {
         try
         {
@@ -111,6 +150,18 @@ public class Titles implements Listener, CommandExecutor
             }
         }
     }
+    
+    private void refreshRankList()
+    {
+        ConfigurationSection section = getPlugin().getConfig().getConfigurationSection("ranks");
+        if(section == null)
+        {
+            section = getPlugin().getConfig().createSection("ranks");
+            getPlugin().saveConfig();
+        }
+        this.rankKeys = new ArrayList<String>(section.getKeys(false));
+        Collections.sort(rankKeys, comparator);    
+    }    
     
     
     /*
@@ -153,14 +204,16 @@ public class Titles implements Listener, CommandExecutor
         String rank = "";
         if(!isAvailable()) return rank;
         ConfigurationSection rankSection = getPlugin().getConfig().getConfigurationSection("ranks");
-        if(rankSection == null) return rank;
+        if(rankSection == null)
+        {
+            return rank;
+        }
         int kills = this.yc.getInt(name, 0);
         int rankKills;
-        
-        for(String key : rankSection.getKeys(false))
+        for(String key : this.rankKeys)
         {
             rankKills = strToInt(key);
-            if(kills > rankKills)
+            if(kills >= rankKills)
             {
                 rank = rankSection.getString(key, "");
             }
@@ -170,6 +223,31 @@ public class Titles implements Listener, CommandExecutor
             }
         }
         return ChatColor.translateAlternateColorCodes('&', rank);
+    }
+    
+    public String getNextTitle(String name)
+    {
+        String rank = "";
+        if(!isAvailable()) return rank;
+        ConfigurationSection rankSection = getPlugin().getConfig().getConfigurationSection("ranks");
+        if(rankSection == null)
+        {
+            return rank;
+        }
+        int kills = this.yc.getInt(name, 0);
+        int rankKills;
+        String str;
+        Iterator<String> it = this.rankKeys.iterator();
+        while(it.hasNext())
+        {
+            str = it.next();
+            rankKills = strToInt(str);
+            if(kills < rankKills)
+            {
+                return ChatColor.translateAlternateColorCodes('&', rankSection.getString(str, ""));
+            }
+        }
+        return "none";
     }
     
     /*
@@ -184,19 +262,37 @@ public class Titles implements Listener, CommandExecutor
         if(player.getLastDamageCause() instanceof EntityDamageByEntityEvent)
         {
             Entity damager = ((EntityDamageByEntityEvent)player.getLastDamageCause()).getDamager();
+            Player other = null;
             if(damager instanceof Player)
             {
-                Player other = ((Player)damager);
-                if(other.getAddress().getAddress().getHostAddress().equals(player.getAddress().getAddress().getHostAddress())) return;
+                other = (Player) damager;
+            }
+            else if(damager instanceof Projectile)
+            {
+                if(((Projectile)damager).getShooter() instanceof Player)
+                    other = (Player) ((Projectile)damager).getShooter();
+            }
+            
+            if(other == null) return;
+            if(other.getAddress().getAddress().getHostAddress().equals(player.getAddress().getAddress().getHostAddress())) return;
                 String oname = other.getName();
-                if(!name.equals(this.lastKill.get(oname)))
-                {
-                    incrementKills(oname);
-                    this.lastKill.put(oname, name);
-                }
+            if(!name.equals(this.lastKill.get(oname)))
+            {
+                incrementKills(oname);
+                this.lastKill.put(oname, name);
             }
         }
-        
+    }
+    
+    @EventHandler
+    public void onRank(RankEvent event)
+    {
+        Player player = Bukkit.getPlayerExact(event.getName());
+        if(player != null)
+        {
+            player.getWorld().playSound(player.getLocation(), Sound.WITHER_SPAWN, 2F, 2F);
+            player.sendMessage(RANKUP);
+        }
     }
 
     /*
@@ -206,6 +302,12 @@ public class Titles implements Listener, CommandExecutor
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args)
     {
+        if(cmd.getName().equals("ranking"))
+        {
+            int kills = this.yc.getInt(sender.getName(), 0);
+            sender.sendMessage(String.format(RANKING, kills, getNextTitle(sender.getName())));
+            return true;
+        }
         if(!sender.hasPermission("titles.edit"))
         {
             sender.sendMessage("Unknown command. Type \"help\" for help");
@@ -220,10 +322,10 @@ public class Titles implements Listener, CommandExecutor
             }
             else
             {
-                if(args[0].equalsIgnoreCase("debug"))
+                if(args[0].equals("debug"))
                 {
+                    sender.sendMessage("kills: "+this.yc.getInt(sender.getName(), -1));
                     sender.sendMessage(getTitle(sender.getName()));
-                    return true;
                 }
                 boolean valid = args[0].equalsIgnoreCase("set") && args.length > 2 || args.length == 2 || args[0].equalsIgnoreCase("list");
                 if(valid)
@@ -261,6 +363,7 @@ public class Titles implements Listener, CommandExecutor
                         getPlugin().getConfig().set("ranks."+rank, title);
                         getPlugin().saveConfig();
                         sender.sendMessage(String.format("Title %s added for rank %d", title, rank));
+                        refreshRankList();
                         return true;
                     }
                     else if(args[0].equalsIgnoreCase("rem"))
@@ -274,6 +377,7 @@ public class Titles implements Listener, CommandExecutor
                         getPlugin().getConfig().set(path, null);
                         getPlugin().saveConfig();
                         sender.sendMessage(String.format("Rank %s cleared", args[1]));
+                        refreshRankList();
                         return true;
                     }
                     else if(args[0].equalsIgnoreCase("list"))
@@ -304,11 +408,5 @@ public class Titles implements Listener, CommandExecutor
         }
         
         return false;
-    }
-    
-    @EventHandler()
-    public void onRank(RankEvent event)
-    {
-        Bukkit.broadcastMessage(String.format("%s %s", event.getTitle(), event.getName()));
     }
 }
